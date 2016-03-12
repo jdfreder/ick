@@ -11,7 +11,8 @@ const Rx = require('@reactivex/rxjs');
 
 const readline = require('readline');
 
-const enchannel = require('enchannel-zmq-backend');
+const enchannel = require('enchannel');
+const enchannelBackend = require('enchannel-zmq-backend');
 const uuid = require('uuid');
 const chalk = require('chalk');
 
@@ -26,33 +27,17 @@ const spawnteract = require('spawnteract');
 
 function main(c) {
   const identity = uuid.v4();
-  const shell = enchannel.createShellSubject(identity, c.config);
-  const stdin = enchannel.createStdinSubject(identity, c.config);
+  const shell = enchannelBackend.createShellSubject(identity, c.config);
+  const stdin = enchannelBackend.createStdinSubject(identity, c.config);
+  const control = enchannelBackend.createControlSubject(identity, c.config);
 
   const session = uuid.v4();
 
-  function createMessage(msg_type) {
-    const username = process.env.LOGNAME || process.env.USER ||
-                     process.env.LNAME || process.env.USERNAME;
-    return {
-      header: {
-        username,
-        session,
-        msg_type,
-        msg_id: uuid.v4(),
-        date: new Date(),
-        version: '5.0',
-      },
-      metadata: {},
-      parent_header: {},
-      content: {},
-    };
-  }
-
-  function isChildMessage(msg) {
-    return this.header.msg_id === msg.parent_header.msg_id;
-  }
-
+  const username = process.env.LOGNAME || process.env.USER ||
+                   process.env.LNAME || process.env.USERNAME;
+  const createMessage = enchannel.createMessage.bind(this, username, session);
+  const isChildMessage = enchannel.isChildMessage;
+  const shutdownRequest = enchannel.shutdownRequest.bind(this, username, session);
   function startREPL(langInfo) {
     const rl = readline.createInterface(process.stdin, process.stdout, (line, callback) => {
       const completeRequest = createMessage('complete_request');
@@ -74,7 +59,7 @@ function main(c) {
       shell.next(completeRequest);
     });
 
-    const iopub = enchannel.createIOPubSubject(identity, c.config);
+    const iopub = enchannelBackend.createIOPubSubject(identity, c.config);
 
     marked.setOptions({
       renderer: new TerminalRenderer(),
@@ -228,25 +213,17 @@ function main(c) {
       shell.next(isCompleteRequest);
     }).on('close', () => {
       console.log('Have a great day!');
-      const shutDownRequest = createMessage('shutdown_request');
-      shutDownRequest.content = {
-        restart: false
-      };
-      const shutDownReply = shell.filter(isChildMessage.bind(shutDownRequest))
-                        .filter(msg => msg.header.msg_type === 'shutdown_reply')
-                        .map(msg => msg.content);
-      shutDownReply.subscribe(content => {
-        if (!content.restart) {
-          c.spawn.kill();
-          shell.complete();
-          iopub.complete();
-          stdin.complete();
-          process.stdin.destroy();
-          fs.unlink(c.connFile);
-        }
-      });
 
-      shell.next(shutDownRequest);
+      shutdownRequest({
+        shell,
+        iopub,
+        control,
+        stdin,
+      }).then(() => {
+        c.spawn.kill();
+        process.stdin.destroy();
+        fs.unlink(c.connFile);
+      });
     });
   }
 

@@ -14,6 +14,7 @@
   "dependencies": {
     "@reactivex/rxjs": "^5.0.0-beta.1",
     "chalk": "^1.1.1",
+    "enchannel": "^1.0.0",
     "enchannel-zmq-backend": "^1.0.0",
     "image-to-ascii": "^2.3.1",
     "marked": "^0.3.5",
